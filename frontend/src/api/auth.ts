@@ -1,5 +1,6 @@
-const BASE_URL = (import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000").replace(/\/$/, "");
-const API_BASE = `${BASE_URL}/api/v1/auth`;
+import { API_V1_URL, parseErrorMessage } from "./client";
+
+const API_BASE = `${API_V1_URL}/auth`;
 
 export interface LoginCredentials {
   email: string;
@@ -41,7 +42,7 @@ export async function login(credentials: LoginCredentials): Promise<LoginRespons
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: "Login failed" }));
-    throw new Error(error.detail || "Login failed");
+    throw new Error(parseErrorMessage(error, "Login failed"));
   }
 
   const data: LoginResponse = await response.json();
@@ -64,7 +65,7 @@ export async function register(data: RegisterCredentials): Promise<AuthResponse>
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: "Registration failed" }));
-    throw new Error(error.detail || "Registration failed");
+    throw new Error(parseErrorMessage(error, "Registration failed"));
   }
 
   return response.json();

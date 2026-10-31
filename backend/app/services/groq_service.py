@@ -138,7 +138,7 @@ Total Workouts:
             .strip()
         )
 
-        print("✅ GROQ SUCCESS")
+        logger.info("Groq AI response generated successfully")
 
         return ai_response
 
@@ -149,15 +149,7 @@ Total Workouts:
 
         error = e.read().decode()
 
-        print(
-            "\n========== GROQ FULL ERROR =========="
-        )
-        print("STATUS:", e.code)
-        print("ERROR:")
-        print(error)
-        print(
-            "=====================================\n"
-        )
+        logger.error(f"Groq API HTTP Error {e.code}: {error}")
 
         return (
             f"Groq Error {e.code}: "
@@ -169,7 +161,7 @@ Total Workouts:
     # ──────────────────────────────────────────────
     except urllib.error.URLError as e:
 
-        print("Network Error:", e)
+        logger.error(f"Groq API Network Error: {e}")
 
         return (
             "Unable to connect to "
@@ -181,7 +173,7 @@ Total Workouts:
     # ──────────────────────────────────────────────
     except Exception as e:
 
-        print("Unexpected Error:", e)
+        logger.error(f"Groq API Unexpected Error: {e}")
 
         return (
             "Coach is warming up 💪 "

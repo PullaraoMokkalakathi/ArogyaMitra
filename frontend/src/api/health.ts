@@ -1,5 +1,6 @@
-const BASE_URL = (import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000").replace(/\/$/, "");
-const API_BASE = `${BASE_URL}/api/v1`;
+import { API_V1_URL, getAuthHeaders, parseErrorMessage } from "./client";
+
+const API_BASE = API_V1_URL;
 
 export interface HealthProfile {
   age: number;
@@ -17,26 +18,7 @@ export interface HealthProfileResponse extends HealthProfile {
   updated_at: string;
 }
 
-function getAuthHeaders() {
-  const token = localStorage.getItem("access_token");
-  return {
-    "Content-Type": "application/json",
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-  };
-}
 
-function parseErrorMessage(data: unknown): string {
-  if (!data || typeof data !== "object") {
-    return "An unknown error occurred";
-  }
-  const obj = data as Record<string, unknown>;
-  if (Array.isArray(obj.detail)) {
-    return obj.detail
-      .map((e) => (typeof e === "object" && e?.msg ? `${e.loc?.join(".")} - ${e.msg}` : String(e)))
-      .join("; ");
-  }
-  return obj.detail ? String(obj.detail) : "An unknown error occurred";
-}
 
 export async function createHealthProfile(data: HealthProfile): Promise<HealthProfileResponse> {
   const response = await fetch(`${API_BASE}/health/profile`, {

@@ -1,5 +1,6 @@
-const BASE_URL = (import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000").replace(/\/$/, "");
-const API_BASE = `${BASE_URL}/api/v1/workout`;
+import { API_V1_URL, getAuthHeaders, parseErrorMessage } from "./client";
+
+const API_BASE = `${API_V1_URL}/workout`;
 
 export interface WorkoutExercise {
   name: string;
@@ -26,14 +27,6 @@ export interface WorkoutPlanResponse {
   weekly_plan: WorkoutDay[];
 }
 
-function getAuthHeaders() {
-  const token = localStorage.getItem("access_token");
-  return {
-    "Content-Type": "application/json",
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-  };
-}
-
 export async function getWorkoutPlan(): Promise<WorkoutPlanResponse> {
   const response = await fetch(`${API_BASE}/plan`, {
     method: "GET",
@@ -42,7 +35,7 @@ export async function getWorkoutPlan(): Promise<WorkoutPlanResponse> {
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ detail: "Failed to fetch workout plan" }));
-    throw new Error(error.detail || "Failed to fetch workout plan");
+    throw new Error(parseErrorMessage(error, "Failed to fetch workout plan"));
   }
 
   return response.json();

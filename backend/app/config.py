@@ -20,14 +20,22 @@ class Settings(BaseSettings):
     app_version: str = "1.0.0"
     debug: bool = False
     environment: str = "development"
+    port: int = 8000
+    host: str = "0.0.0.0"
 
     # Database
     database_url: str = (
         "sqlite:///./arogya_mitra.db"
     )
 
+    # Database Connection Pool (PostgreSQL)
+    db_pool_size: int = 10
+    db_max_overflow: int = 20
+    db_pool_recycle: int = 300
+    db_pool_timeout: int = 30
+
     # JWT / Security
-    jwt_secret_key: str = ""
+    jwt_secret_key: str = "arogya-mitra-insecure-dev-secret-key-change-in-production-12345"
     jwt_algorithm: str = "HS256"
 
     access_token_expire_minutes: int = 60
@@ -64,23 +72,34 @@ class Settings(BaseSettings):
     )
 
     @property
-    def cors_origins_list(
-        self
-    ) -> List[str]:
+    def is_production(self) -> bool:
+        return self.environment.lower() == "production"
+
+    @property
+    def cors_origins_list(self) -> List[str]:
         if not self.cors_origins:
-            return ["*"]
-        return [
-            origin.strip()
-            for origin in
-            self.cors_origins.split(",")
-            if origin.strip()
-        ]
+            return ["http://localhost:5173", "http://localhost:3000"] if not self.is_production else []
+
+        raw = self.cors_origins.strip()
+        # Handle bracketed strings like [http://localhost:5173, https://your-frontend.vercel.app]
+        if raw.startswith("[") and raw.endswith("]"):
+            raw = raw[1:-1]
+
+        origins = []
+        for item in raw.split(","):
+            cleaned = item.strip().strip("'\"").rstrip("/")
+            if cleaned:
+                origins.append(cleaned)
+
+        # In production, avoid wildcard origins for safety with credentials
+        if self.is_production:
+            origins = [o for o in origins if o != "*"]
+
+        return origins
 
     @property
     def is_sqlite(self) -> bool:
-        return self.database_url.startswith(
-            "sqlite"
-        )
+        return self.database_url.startswith("sqlite")
 
 
 @lru_cache()

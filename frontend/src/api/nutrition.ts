@@ -1,5 +1,6 @@
-const BASE_URL = (import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000").replace(/\/$/, "");
-const API_BASE = `${BASE_URL}/api/v1`;
+import { API_V1_URL, getAuthHeaders, parseErrorMessage } from "./client";
+
+const API_BASE = `${API_V1_URL}/nutrition`;
 
 export interface MacroData {
   protein_g: number;
@@ -35,19 +36,14 @@ export interface NutritionPlanResponse {
 }
 
 export const getNutritionPlan = async (): Promise<NutritionPlanResponse> => {
-  const token = localStorage.getItem("access_token");
-  if (!token) throw new Error("Not authenticated");
-
-  const response = await fetch(`${API_BASE}/nutrition/plan`, {
+  const response = await fetch(`${API_BASE}/plan`, {
     method: "GET",
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
+    headers: getAuthHeaders(),
   });
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => null);
-    throw new Error(errorData?.detail || "Failed to fetch nutrition plan");
+    throw new Error(parseErrorMessage(errorData, "Failed to fetch nutrition plan"));
   }
 
   return response.json();

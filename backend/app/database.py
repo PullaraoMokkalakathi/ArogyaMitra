@@ -4,6 +4,7 @@
 # SQLite (dev) + PostgreSQL-ready (production).
 # ──────────────────────────────────────────────────────────────
 
+import logging
 from typing import Generator
 
 from sqlalchemy import create_engine, event, text
@@ -11,13 +12,11 @@ from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.config import settings
 
+logger = logging.getLogger(__name__)
 
 # ── Engine ─────────────────────────────────────────────────────
-# SQLite requires check_same_thread=False to allow FastAPI's
-# async threadpool to share the same connection across threads.
-# For PostgreSQL, this argument is ignored entirely.
-
 db_url = settings.database_url
+
 # Normalize PostgreSQL URL for SQLAlchemy 2.0 with psycopg (v3)
 if db_url.startswith("postgres://"):
     db_url = db_url.replace("postgres://", "postgresql+psycopg://", 1)
@@ -25,18 +24,25 @@ elif db_url.startswith("postgresql://") and not db_url.startswith("postgresql+")
     db_url = db_url.replace("postgresql://", "postgresql+psycopg://", 1)
 
 connect_args: dict = {}
+engine_kwargs: dict = {
+    "pool_pre_ping": True,         # Verify connections before checkout (handles dropped/stale connections)
+    "pool_recycle": settings.db_pool_recycle,  # Recycle connections periodically
+    "echo": settings.debug,        # Log SQL statements only in debug mode
+}
 
 if settings.is_sqlite:
+    # SQLite requires check_same_thread=False for FastAPI multi-threaded requests
     connect_args["check_same_thread"] = False
+    engine_kwargs["connect_args"] = connect_args
+else:
+    # PostgreSQL connection pool settings (for Supabase / Render)
+    engine_kwargs.update({
+        "pool_size": settings.db_pool_size,
+        "max_overflow": settings.db_max_overflow,
+        "pool_timeout": settings.db_pool_timeout,
+    })
 
-engine = create_engine(
-    db_url,
-    connect_args=connect_args,
-    # Pool settings tuned for both SQLite (dev) and PostgreSQL (prod).
-    pool_pre_ping=True,       # Verify connections before use (handles stale connections)
-    pool_recycle=1800,        # Recycle connections every 30 mins
-    echo=settings.debug,      # Log SQL statements only in debug mode
-)
+engine = create_engine(db_url, **engine_kwargs)
 
 
 # ── SQLite performance pragmas ──────────────────────────────────
@@ -107,16 +113,17 @@ def get_db() -> Generator[Session, None, None]:
 # ── Database Initialization ────────────────────────────────────
 def init_db() -> None:
     """
-    Create all tables defined in ORM models.
+    Create all tables defined in ORM models if they don't already exist.
     Called once at application startup from main.py.
-
-    Import all models before calling this so SQLAlchemy
-    discovers them and includes them in Base.metadata.
+    Non-destructive: existing tables and data are preserved.
     """
-    # Import models here to register them with Base.metadata
     from app.models import user, health_profile, progress  # noqa: F401
 
-    Base.metadata.create_all(bind=engine)
+    try:
+        Base.metadata.create_all(bind=engine)
+    except Exception as exc:
+        logger.error(f"Failed to auto-create tables: {exc}")
+        raise
 
 
 def check_db_connection() -> bool:
@@ -128,5 +135,6 @@ def check_db_connection() -> bool:
         with engine.connect() as connection:
             connection.execute(text("SELECT 1"))
         return True
-    except Exception:
+    except Exception as exc:
+        logger.warning(f"Database connectivity check failed: {exc}")
         return False

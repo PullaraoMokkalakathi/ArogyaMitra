@@ -1,5 +1,6 @@
-const BASE_URL = (import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000").replace(/\/$/, "");
-const API_BASE = `${BASE_URL}/api/v1`;
+import { API_V1_URL, getAuthHeaders, parseErrorMessage } from "./client";
+
+const API_BASE = `${API_V1_URL}/ai`;
 
 export interface Message {
   role: "user" | "assistant" | "system";
@@ -7,16 +8,15 @@ export interface Message {
 }
 
 export const sendChatMessage = async (messages: Message[]): Promise<string> => {
-  const token = localStorage.getItem("access_token");
-  const res = await fetch(`${API_BASE}/ai/chat`, {
+  const res = await fetch(`${API_BASE}/chat`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`
-    },
+    headers: getAuthHeaders(),
     body: JSON.stringify({ messages })
   });
-  if (!res.ok) throw new Error("Failed to get response");
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({ detail: "Failed to get response" }));
+    throw new Error(parseErrorMessage(errorData, "Failed to get response"));
+  }
   const data = await res.json();
   return data.response;
 };

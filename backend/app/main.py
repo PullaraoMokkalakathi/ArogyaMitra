@@ -1,7 +1,6 @@
-# ──────────────────────────────────────────────────────────────
+﻿# ──────────────────────────────────────────────────────────────
 # main.py
 # ArogyaMitra FastAPI application entry point.
-# Initializes the app, middleware, rate limiting, and routes.
 # ──────────────────────────────────────────────────────────────
 import logging
 from contextlib import asynccontextmanager
@@ -27,8 +26,6 @@ logger = logging.getLogger(__name__)
 
 
 # ── Rate Limiter ───────────────────────────────────────────────
-# Uses client IP address as the rate-limit key.
-# The limiter instance is shared across all routers via app.state.
 limiter = Limiter(
     key_func=get_remote_address,
     default_limits=[settings.rate_limit_general],
@@ -36,31 +33,41 @@ limiter = Limiter(
 
 
 # ── Lifespan ───────────────────────────────────────────────────
-# Replaces deprecated @app.on_event("startup").
-# Runs startup logic before the first request, cleanup on shutdown.
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # ── Startup ────────────────────────────────────────────────
     logger.info("━" * 60)
     logger.info(f"  {settings.app_name} v{settings.app_version} starting up")
     logger.info(f"  Environment : {settings.environment}")
+    logger.info(f"  Port        : {settings.port}")
     safe_db_url = settings.database_url.split("@")[-1] if "@" in settings.database_url else settings.database_url
     logger.info(f"  Database    : {safe_db_url}")
     logger.info(f"  CORS Origins: {settings.cors_origins_list}")
     logger.info("━" * 60)
 
-    # Create all database tables
+    if settings.is_production:
+        secret = settings.jwt_secret_key or ""
+        if not secret.strip():
+            raise RuntimeError("JWT_SECRET_KEY must be set in production environment")
+        if "insecure-dev" in secret.lower() or secret == "arogya-mitra-insecure-dev-secret-key-change-in-production-12345":
+            raise RuntimeError("Insecure default JWT_SECRET_KEY is not allowed in production. Generate a strong secret key.")
+        if len(secret) < 32:
+            raise RuntimeError("JWT_SECRET_KEY must be at least 32 characters long in production")
+        prod_origins = settings.cors_origins_list
+        if not prod_origins:
+            raise RuntimeError("CORS_ORIGINS must be explicitly configured in production (no wildcard allowed)")
+        if "*" in prod_origins:
+            raise RuntimeError("Wildcard CORS origins are not allowed in production")
+
     try:
         init_db()
-        logger.info("✓ Database tables initialized successfully")
+        logger.info("✓ Database initialized successfully")
     except Exception as exc:
-        logger.critical(f"✗ Database initialization failed: {exc}")
-        raise
+        logger.error(f"✗ Database initialization error: {exc}")
+        if not settings.is_production:
+            raise
+        logger.warning("Continuing startup in production — verify database migrations with lembic upgrade head.")
 
-    yield  # Application runs here
-
-    # ── Shutdown ───────────────────────────────────────────────
+    yield
     logger.info(f"  {settings.app_name} shutting down gracefully")
 
 
@@ -68,164 +75,77 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.app_name,
     version=settings.app_version,
-    description=(
-        "ArogyaMitra – Adaptive AI Health & Wellness Coach. "
-        "Enterprise-grade multi-agent AI platform for personalized "
-        "workout generation, nutrition planning, and wellness coaching."
-    ),
-    docs_url="/docs",           # Swagger UI
-    redoc_url="/redoc",         # ReDoc UI
-    openapi_url="/openapi.json",
+    description="ArogyaMitra – Adaptive AI Health & Wellness Coach.",
+    docs_url="/docs" if not settings.is_production else None,
+    redoc_url="/redoc" if not settings.is_production else None,
+    openapi_url="/openapi.json" if not settings.is_production else None,
     lifespan=lifespan,
 )
 
-
-# ── Rate Limiter State ─────────────────────────────────────────
-# Attach limiter to app.state so slowapi can discover it.
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-
-# ── CORS Middleware ────────────────────────────────────────────
 origins = settings.cors_origins_list
-allow_all = "*" in origins
+is_production = settings.is_production
+allow_credentials = True
+cors_origins_to_allow = origins
+
+if not is_production and ("*" in origins or not origins):
+    cors_origins_to_allow = ["*"]
+    allow_credentials = False
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins if not allow_all else ["*"],
-    allow_credentials=False if allow_all else True,
-    allow_methods=["*"],
+    allow_origins=cors_origins_to_allow,
+    allow_origin_regex=None,
+    allow_credentials=allow_credentials,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 
-# ── Global Exception Handlers ──────────────────────────────────
-
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    """
-    Catch-all for unhandled exceptions.
-    Returns a safe error response — never exposes stack traces in production.
-    """
     logger.error(f"Unhandled exception on {request.method} {request.url}: {exc}", exc_info=True)
-
-    # In debug mode return the error message; in production return a generic message.
     detail = str(exc) if settings.debug else "An internal server error occurred."
-
-    return JSONResponse(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={
-            "success": False,
-            "error": "INTERNAL_SERVER_ERROR",
-            "message": detail,
-            "path": str(request.url),
-        },
-    )
+    return JSONResponse(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content={"success": False, "error": "INTERNAL_SERVER_ERROR", "message": detail, "path": str(request.url)})
 
 
 @app.exception_handler(404)
 async def not_found_handler(request: Request, exc: Exception) -> JSONResponse:
-    return JSONResponse(
-        status_code=status.HTTP_404_NOT_FOUND,
-        content={
-            "success": False,
-            "error": "NOT_FOUND",
-            "message": f"Route {request.url.path} does not exist.",
-        },
-    )
+    return JSONResponse(status_code=status.HTTP_404_NOT_FOUND, content={"success": False, "error": "NOT_FOUND", "message": f"Route {request.url.path} does not exist."})
 
 
 @app.exception_handler(405)
 async def method_not_allowed_handler(request: Request, exc: Exception) -> JSONResponse:
-    return JSONResponse(
-        status_code=status.HTTP_405_METHOD_NOT_ALLOWED,
-        content={
-            "success": False,
-            "error": "METHOD_NOT_ALLOWED",
-            "message": f"Method {request.method} is not allowed on this endpoint.",
-        },
-    )
+    return JSONResponse(status_code=status.HTTP_405_METHOD_NOT_ALLOWED, content={"success": False, "error": "METHOD_NOT_ALLOWED", "message": f"Method {request.method} is not allowed on this endpoint."})
 
 
-# ── Root Endpoint ──────────────────────────────────────────────
 @app.get("/", tags=["Root"], summary="API root")
 async def root():
-    """
-    Root endpoint — confirms the API is live.
-    """
-    return {
-        "success": True,
-        "message": f"Welcome to {settings.app_name} API",
-        "version": settings.app_version,
-        "docs": "/docs",
-        "health": "/health",
-    }
+    return {"success": True, "message": f"Welcome to {settings.app_name} API", "version": settings.app_version, "docs": "/docs" if not settings.is_production else "disabled in production", "health": "/health"}
 
 
-# ── Health Check Endpoint ──────────────────────────────────────
 @app.get("/health", tags=["Health"], summary="Service health check")
 async def health_check():
-    """
-    Readiness probe for load balancers and deployment platforms.
-    Returns API status, database connectivity, environment info, and version.
-    """
     db_ok = check_db_connection()
-
     overall_status = "healthy" if db_ok else "degraded"
     http_status = status.HTTP_200_OK if db_ok else status.HTTP_503_SERVICE_UNAVAILABLE
+    return JSONResponse(status_code=http_status, content={"success": db_ok, "status": overall_status, "timestamp": datetime.now(timezone.utc).isoformat(), "app": {"name": settings.app_name, "version": settings.app_version, "environment": settings.environment, "debug": settings.debug}, "services": {"database": "connected" if db_ok else "unreachable"}})
 
-    return JSONResponse(
-        status_code=http_status,
-        content={
-            "success": db_ok,
-            "status": overall_status,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "app": {
-                "name": settings.app_name,
-                "version": settings.app_version,
-                "environment": settings.environment,
-                "debug": settings.debug,
-            },
-            "services": {
-                "database": "connected" if db_ok else "unreachable",
-            },
-        },
-    )
-
-
-# ── API v1 Router Registration ─────────────────────────────────
-# Routers are registered here under the /api/v1 prefix.
-# Each router is imported only after its module is created
-# to avoid circular import errors during incremental development.
 
 API_V1_PREFIX = "/api/v1"
+from app.routers import auth, health, workout, posture, nutrition, progress, ai
+app.include_router(auth.router, prefix=API_V1_PREFIX)
+app.include_router(health.router, prefix=API_V1_PREFIX)
+app.include_router(workout.router, prefix=API_V1_PREFIX)
+app.include_router(posture.router, prefix=API_V1_PREFIX)
+app.include_router(nutrition.router, prefix=API_V1_PREFIX)
+app.include_router(progress.router, prefix=API_V1_PREFIX)
+app.include_router(ai.router, prefix=API_V1_PREFIX)
 
-# ── Auth Router ───────────────────────────────────────────────
-from app.routers import auth
-app.include_router(auth.router, prefix="/api/v1")
 
-# ── Health Profile Router ──────────────────────────────────────
-from app.routers import health
-app.include_router(health.router, prefix="/api/v1")
-
-# ── Workout Router ────────────────────────────────────────────────
-from app.routers import workout
-app.include_router(workout.router, prefix="/api/v1")
-
-# ── Posture Router ────────────────────────────────────────────────
-from app.routers import posture
-app.include_router(posture.router, prefix="/api/v1")
-
-# ── Nutrition Router ──────────────────────────────────────────────
-from app.routers import nutrition
-app.include_router(nutrition.router, prefix="/api/v1")
-
-# ── Progress Router ───────────────────────────────────────────────
-from app.routers import progress
-app.include_router(progress.router, prefix="/api/v1")
-
-# ── AI Router ──────────────────────────────
-from app.routers import ai
-app.include_router(ai.router, prefix="/api/v1")
-
-logger.info("Router registration placeholder ready — uncomment as each router is added.")
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("app.main:app", host=settings.host, port=settings.port, reload=settings.debug)

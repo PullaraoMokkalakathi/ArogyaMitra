@@ -1,5 +1,6 @@
-const BASE_URL = (import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000").replace(/\/$/, "");
-const API_BASE = `${BASE_URL}/api/v1`;
+import { API_V1_URL, getAuthHeaders, parseErrorMessage } from "./client";
+
+const API_BASE = `${API_V1_URL}/progress`;
 
 export interface ProgressCreateRequest {
   exercise_name: string;
@@ -38,24 +39,25 @@ export interface ProgressStatsResponse {
 }
 
 export const logProgress = async (data: ProgressCreateRequest): Promise<ProgressResponse> => {
-  const token = localStorage.getItem("access_token");
-  const res = await fetch(`${API_BASE}/progress/log`, {
+  const res = await fetch(`${API_BASE}/log`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`
-    },
+    headers: getAuthHeaders(),
     body: JSON.stringify(data)
   });
-  if (!res.ok) throw new Error("Failed to log progress");
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({ detail: "Failed to log progress" }));
+    throw new Error(parseErrorMessage(errorData, "Failed to log progress"));
+  }
   return res.json();
 };
 
 export const getProgressStats = async (): Promise<ProgressStatsResponse> => {
-  const token = localStorage.getItem("access_token");
-  const res = await fetch(`${API_BASE}/progress/stats`, {
-    headers: { Authorization: `Bearer ${token}` }
+  const res = await fetch(`${API_BASE}/stats`, {
+    headers: getAuthHeaders()
   });
-  if (!res.ok) throw new Error("Failed to load progress stats");
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({ detail: "Failed to load progress stats" }));
+    throw new Error(parseErrorMessage(errorData, "Failed to load progress stats"));
+  }
   return res.json();
 };
