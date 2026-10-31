@@ -6,6 +6,7 @@
 
 import logging
 from typing import Generator
+from urllib.parse import urlparse
 
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
@@ -22,6 +23,18 @@ if db_url.startswith("postgres://"):
     db_url = db_url.replace("postgres://", "postgresql+psycopg://", 1)
 elif db_url.startswith("postgresql://") and not db_url.startswith("postgresql+"):
     db_url = db_url.replace("postgresql://", "postgresql+psycopg://", 1)
+
+# Safe diagnostic logging (no credentials or full URL)
+try:
+    parsed = urlparse(db_url)
+    logger.info(
+        "Database connection target: driver=%s host=%s port=%s",
+        parsed.scheme,
+        parsed.hostname,
+        parsed.port,
+    )
+except Exception:
+    logger.debug("Could not parse database URL for diagnostic logging")
 
 connect_args: dict = {}
 engine_kwargs: dict = {
