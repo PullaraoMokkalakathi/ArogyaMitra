@@ -5,6 +5,7 @@
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -39,8 +40,25 @@ async def lifespan(app: FastAPI):
     logger.info(f"  {settings.app_name} v{settings.app_version} starting up")
     logger.info(f"  Environment : {settings.environment}")
     logger.info(f"  Port        : {settings.port}")
-    safe_db_url = settings.database_url.split("@")[-1] if "@" in settings.database_url else settings.database_url
-    logger.info(f"  Database    : {safe_db_url}")
+    
+    # Safe database hostname/port logging (no credentials, full URL, or query params)
+    try:
+        db_url = settings.database_url
+        if db_url.startswith("postgres://"):
+            db_url = db_url.replace("postgres://", "postgresql+psycopg://", 1)
+        elif db_url.startswith("postgresql://") and not db_url.startswith("postgresql+"):
+            db_url = db_url.replace("postgresql://", "postgresql+psycopg://", 1)
+        parsed = urlparse(db_url)
+        logger.info(f"  Database    : {parsed.hostname}:{parsed.port}")
+        logger.info(
+            "Database connection target: driver=%s host=%s port=%s",
+            parsed.scheme,
+            parsed.hostname,
+            parsed.port,
+        )
+    except Exception:
+        logger.debug("Could not parse database host/port for logging")
+    
     logger.info(f"  CORS Origins: {settings.cors_origins_list}")
     logger.info("━" * 60)
 
